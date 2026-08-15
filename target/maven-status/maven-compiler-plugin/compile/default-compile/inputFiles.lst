@@ -1,3 +1,9 @@
 /home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/JRawEditor.java
+/home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/dialog/ExposureDialog.java
+/home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/model/ExposureSettings.java
+/home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/model/ImageAdjustmentHistory.java
 /home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/nativeffi/LibRawFFM.java
+/home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/processing/AutoExposureProcessingEngine.java
+/home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/processing/ExposureProcessingEngine.java
 /home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/ui/RawEditorController.java
+/home/andrea/workspace/java/JRawEditor/src/main/java/it/aromagnoli/raw/util/RawImageConverter.java

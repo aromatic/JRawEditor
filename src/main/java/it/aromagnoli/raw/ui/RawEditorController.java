@@ -1,14 +1,22 @@
 
 package it.aromagnoli.raw.ui;
 
+import it.aromagnoli.raw.dialog.ExposureDialog;
+import it.aromagnoli.raw.model.ExposureSettings;
+import it.aromagnoli.raw.model.ImageAdjustmentHistory;
 import it.aromagnoli.raw.nativeffi.LibRawFFM;
-
+import it.aromagnoli.raw.processing.AutoExposureProcessingEngine;
+import it.aromagnoli.raw.processing.ExposureProcessingEngine;
+import it.aromagnoli.raw.util.RawImageConverter;
 import javafx.concurrent.Task;
 import javafx.embed.swing.SwingFXUtils;
+import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -18,6 +26,9 @@ import javafx.stage.Stage;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.Optional;
+
+import org.opencv.core.Mat;
 
 public class RawEditorController {
 
@@ -53,15 +64,119 @@ public class RawEditorController {
 
     private File currentRawFile = null;
 
+    private MenuItem menuEsposizioneManuale;
+    private MenuItem menuEsposizioneAutomatica;
+
+    //@FXML private ImageView imageView;
+
+    // La matrice base decodificata dal RAW in formato Float32 [0.0 - 1.0]
+    private Mat originalRawMatFloat; 
+    
+    private ExposureSettings currentAutoExposureSettings = ExposureSettings.defaultAutoSettings();
+    private ExposureSettings currentManualExposureSettings = ExposureSettings.defaultManualSettings();
+    private ImageAdjustmentHistory history = new ImageAdjustmentHistory();
+
     public RawEditorController(Stage stage) {
         setupUI(stage);
+    }
+
+    @FXML
+    public void initialize() {
+        // Disabilita inizialmente il menù fino a quando un'immagine non viene caricata
+        if (menuEsposizioneManuale != null) {
+            menuEsposizioneManuale.setDisable(true);
+        }
+        menuEsposizioneManuale.setAccelerator(KeyCombination.keyCombination("Shortcut+E"));
+
+        // Disabilita inizialmente il menù fino a quando un'immagine non viene caricata
+        if (menuEsposizioneAutomatica != null) {
+            menuEsposizioneAutomatica.setDisable(true);
+        }
+        menuEsposizioneAutomatica.setAccelerator(KeyCombination.keyCombination("Shortcut+A"));
     }
 
     public BorderPane getRootLayout() {
         return rootLayout;
     }
 
+    /**
+     * Chiamata all'apertura del Dialog di Esposizione
+     */
+    private void openAutoExposureDialog() {
+        //if (originalRawMatFloat == null || originalRawMatFloat.empty()) return;
+
+        ExposureSettings previousSettings = this.currentAutoExposureSettings;
+
+        // Dialog non-distruttivo con Live Preview
+        ExposureDialog dialog = new ExposureDialog(previousSettings, newSettings -> {
+            applyAutoExposurePreview(newSettings);
+        });
+
+        Optional<ExposureSettings> result = dialog.showAndWait();
+
+        if (result.isPresent()) {
+            // Conferma: aggiorna impostazioni correnti e aggiungi allo storico
+            this.currentAutoExposureSettings = result.get();
+            this.history.addStep(this.currentAutoExposureSettings);
+        } else {
+            // Annulla: ripristina la preview allo stato precedente
+            this.currentAutoExposureSettings = previousSettings;
+            applyAutoExposurePreview(previousSettings);
+        }
+    }
+
+
+    /**
+     * Chiamata all'apertura del Dialog di Esposizione
+     */
+    private void openManualExposureDialog() {
+        //if (originalRawMatFloat == null || originalRawMatFloat.empty()) return;
+
+        ExposureSettings previousSettings = this.currentManualExposureSettings;
+
+        // Dialog non-distruttivo con Live Preview
+        ExposureDialog dialog = new ExposureDialog(previousSettings, newSettings -> {
+            applyExposurePreview(newSettings);
+        });
+
+        Optional<ExposureSettings> result = dialog.showAndWait();
+
+        if (result.isPresent()) {
+            // Conferma: aggiorna impostazioni correnti e aggiungi allo storico
+            this.currentManualExposureSettings = result.get();
+            this.history.addStep(this.currentManualExposureSettings);
+        } else {
+            // Annulla: ripristina la preview allo stato precedente
+            this.currentManualExposureSettings = previousSettings;
+            applyExposurePreview(previousSettings);
+        }
+    }
+
+    private void applyAutoExposurePreview(ExposureSettings settings) {
+        // Genera la nuova Image JavaFX a partire dalla Mat Float originale immutata
+        Image updatedImage = AutoExposureProcessingEngine.processAndToFxImage(originalRawMatFloat, settings);
+        if (updatedImage != null) {
+            imageView.setImage(updatedImage);
+        } else {
+             System.out.println("Immagine null");
+        }
+    }
+
+    private void applyExposurePreview(ExposureSettings settings) {
+        // Genera la nuova Image JavaFX a partire dalla Mat Float originale immutata
+        Image updatedImage = ExposureProcessingEngine.processAndToFxImage(originalRawMatFloat, settings);
+        if (updatedImage != null) {
+            imageView.setImage(updatedImage);
+        } else {
+             System.out.println("Immagine null");
+        }
+    }
+
     private void setupUI(Stage stage) {
+        // 1. Crea la barra dei menù principale
+        MenuBar mainMenuBar = createMenuBar();
+        rootLayout.setTop(mainMenuBar);
+
         // --- Area Centrale (Immagine & Spinner) ---
         imageView.setPreserveRatio(true);
         imageView.fitWidthProperty().bind(rootLayout.widthProperty().subtract(320));
@@ -266,6 +381,43 @@ public class RawEditorController {
         rootLayout.setBottom(statusBar);
     }
 
+    /**
+     * Metodo helper per costruire la barra dei menù e le sue voci
+     */
+    private MenuBar createMenuBar() {
+        MenuBar menuBar = new MenuBar();
+
+        // --- Menù Immagine ---
+        Menu menuImmagine = new Menu("Immagine");
+        
+        // Assegnazione della variabile membro di classe così da poterla usare/abilitare dopo
+        this.menuEsposizioneManuale = new MenuItem("Esposizione manuale");
+        
+        // Stato iniziale: disabilitato se non c'è ancora un'immagine caricata
+        this.menuEsposizioneManuale.setDisable(true);
+        
+        // Collega l'azione di apertura del Dialog
+        this.menuEsposizioneManuale.setOnAction(e -> openManualExposureDialog());
+
+        menuImmagine.getItems().add(this.menuEsposizioneManuale);
+
+        // Assegnazione della variabile membro di classe così da poterla usare/abilitare dopo
+        this.menuEsposizioneAutomatica = new MenuItem("Esposizione automatica");
+        
+        // Stato iniziale: disabilitato se non c'è ancora un'immagine caricata
+        this.menuEsposizioneAutomatica.setDisable(true);
+        
+        // Collega l'azione di apertura del Dialog
+        this.menuEsposizioneAutomatica.setOnAction(e -> openAutoExposureDialog());
+
+        menuImmagine.getItems().add(this.menuEsposizioneAutomatica);
+
+        // Aggiungi i menù alla barra
+        menuBar.getMenus().addAll(menuImmagine);
+
+        return menuBar;
+    }
+
     private Spinner<Double> createWbSpinner() {
         Spinner<Double> spinner = new Spinner<>(0.1, 10.0, 1.0, 0.05);
         spinner.setEditable(true);
@@ -285,6 +437,16 @@ public class RawEditorController {
         if (selectedFile != null) {
             this.currentRawFile = selectedFile;
             reloadRawImage();
+        }
+
+        // 2. Abilita la voce di menù nell'interfaccia
+        if (menuEsposizioneManuale != null) {
+            menuEsposizioneManuale.setDisable(false);
+        }
+
+        // 2. Abilita la voce di menù nell'interfaccia
+        if (menuEsposizioneAutomatica != null) {
+            menuEsposizioneAutomatica.setDisable(false);
         }
     }
 
@@ -318,17 +480,19 @@ public class RawEditorController {
 
         final float[] finalCustomMul = customMul;
 
-        // Esecuzione asincrona del demosaicing in background
-        Task<BufferedImage> rawTask = new Task<>() {
+        // Struttura di supporto per restituire sia il BufferedImage (per FX) sia la Mat Float
+        record RawLoadResult(BufferedImage bImg, Mat floatMat) {}
+
+        // Esecuzione asincrona del demosaicing e conversione OpenCV in background
+        Task<RawLoadResult> rawTask = new Task<>() {
             @Override
-            protected BufferedImage call() throws Exception {
+            protected RawLoadResult call() throws Exception {
                 try (LibRawFFM rawDecoder = new LibRawFFM()) {
+                    BufferedImage bImg;
                     if (!isLinearMode) {
-                        // VECCHIO METODO (Inalterato)
-                        return rawDecoder.processRawFile(filePath, fastPreview, cameraWB, autoWB);
+                        bImg = rawDecoder.processRawFile(filePath, fastPreview, cameraWB, autoWB);
                     } else {
-                        // NUOVO METODO LINEARE (Parametrizzato)
-                        return rawDecoder.processRawFileLinear(
+                        bImg = rawDecoder.processRawFileLinear(
                                 filePath,
                                 cameraWB,
                                 autoWB,
@@ -339,6 +503,11 @@ public class RawEditorController {
                                 fastPreview
                         );
                     }
+
+                    // Conversione in Mat CV_32FC3 eseguita in background
+                    Mat floatMat = RawImageConverter.bufferedImageToMatFloat32(bImg);
+
+                    return new RawLoadResult(bImg, floatMat);
                 } catch (Throwable t) {
                     throw new Exception("Errore decodifica RAW: " + t.getMessage(), t);
                 }
@@ -346,7 +515,32 @@ public class RawEditorController {
         };
 
         rawTask.setOnSucceeded(e -> {
-            BufferedImage bImg = rawTask.getValue();
+            RawLoadResult result = rawTask.getValue();
+            BufferedImage bImg = result.bImg();
+
+            // 1. Libera la memoria nativa della matrice precedente prima di sostituirla
+            if (this.originalRawMatFloat != null && !this.originalRawMatFloat.empty()) {
+            this.originalRawMatFloat.release();
+            }
+
+            // 2. Assegna la nuova matrice Float
+            this.originalRawMatFloat = result.floatMat();
+
+            // 3. Resetta le impostazioni di esposizione correnti
+            this.currentManualExposureSettings = ExposureSettings.defaultManualSettings();
+            this.currentAutoExposureSettings = ExposureSettings.defaultAutoSettings();
+
+            // 4. Abilita la voce di menù Esposizione
+            if (menuEsposizioneManuale != null) {
+                menuEsposizioneManuale.setDisable(false);
+            }
+
+             // 4. Abilita la voce di menù Esposizione
+            if (menuEsposizioneAutomatica != null) {
+                menuEsposizioneAutomatica.setDisable(false);
+            }
+
+            // 5. Aggiorna l'interfaccia JavaFX
             imageView.setImage(SwingFXUtils.toFXImage(bImg, null));
             progressIndicator.setVisible(false);
             btnOpenFile.setDisable(false);
@@ -366,7 +560,8 @@ public class RawEditorController {
         new Thread(rawTask).start();
     }
 
-    // Records di comodo per popolamento ComboBox
+
+     // Records di comodo per popolamento ComboBox
     private record DemosaicOption(String label, int code) {
         @Override
         public String toString() { return label; }
@@ -390,178 +585,3 @@ public class RawEditorController {
 
 
 
-/*package it.aromagnoli.raw.ui;
-
-import it.aromagnoli.raw.nativeffi.LibRawFFM;
-
-import javafx.concurrent.Task;
-import javafx.embed.swing.SwingFXUtils;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
-import javafx.scene.control.*;
-import javafx.scene.image.ImageView;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.VBox;
-import javafx.stage.FileChooser;
-import javafx.stage.Stage;
-
-import java.awt.image.BufferedImage;
-import java.io.File;
-
-public class RawEditorController {
-
-    private final BorderPane rootLayout = new BorderPane();
-    private final ImageView imageView = new ImageView();
-    private final ProgressIndicator progressIndicator = new ProgressIndicator();
-    private final Label statusLabel = new Label("Seleziona un file RAW per iniziare");
-
-    // Controlli UI
-    private CheckBox chkFastPreview;
-    private CheckBox chkCameraWB;
-    private CheckBox chkAutoWB;
-    private Button btnOpenFile;
-
-    private File currentRawFile = null;
-
-    public RawEditorController(Stage stage) {
-        setupUI(stage);
-    }
-
-    public BorderPane getRootLayout() {
-        return rootLayout;
-    }
-
-    private void setupUI(Stage stage) {
-        // --- Area Centrale (Immagine & Spinner) ---
-        imageView.setPreserveRatio(true);
-        // Ridimensiona l'immagine mantenendo le proporzioni nella finestra
-        imageView.fitWidthProperty().bind(rootLayout.widthProperty().subtract(250));
-        imageView.fitHeightProperty().bind(rootLayout.heightProperty().subtract(50));
-
-        StackPaneImageWrapper centerPane = new StackPaneImageWrapper(imageView, progressIndicator);
-        progressIndicator.setVisible(false);
-        rootLayout.setCenter(centerPane);
-
-        // --- Pannello Laterale Destro (Controlli RAW) ---
-        VBox sidebar = new VBox(15);
-        sidebar.setPadding(new Insets(15));
-        sidebar.setStyle("-fx-background-color: #2b2b2b;");
-        sidebar.setPrefWidth(240);
-
-        Label titleLabel = new Label("Impostazioni RAW");
-        titleLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
-
-        btnOpenFile = new Button("📁 Apri File RAW");
-        btnOpenFile.setMaxWidth(Double.MAX_VALUE);
-        btnOpenFile.setOnAction(e -> openFileChooser(stage));
-
-        chkFastPreview = new CheckBox("Anteprima Veloce (Half Size)");
-        chkFastPreview.setSelected(true);
-        chkFastPreview.setStyle("-fx-text-fill: white;");
-
-        chkCameraWB = new CheckBox("Bilanciamento Fotocamera");
-        chkCameraWB.setSelected(true);
-        chkCameraWB.setStyle("-fx-text-fill: white;");
-
-        chkAutoWB = new CheckBox("Auto Bilanciamento Bianco");
-        chkAutoWB.setStyle("-fx-text-fill: white;");
-
-        // Mutua esclusione basica per i WB
-        chkCameraWB.setOnAction(e -> {
-            if (chkCameraWB.isSelected()) chkAutoWB.setSelected(false);
-            reloadRawImage();
-        });
-        chkAutoWB.setOnAction(e -> {
-            if (chkAutoWB.isSelected()) chkCameraWB.setSelected(false);
-            reloadRawImage();
-        });
-        chkFastPreview.setOnAction(e -> reloadRawImage());
-
-        sidebar.getChildren().addAll(
-                titleLabel,
-                btnOpenFile,
-                new Separator(),
-                chkFastPreview,
-                chkCameraWB,
-                chkAutoWB
-        );
-
-        rootLayout.setRight(sidebar);
-
-        // --- Barra di Stato Inferiore ---
-        HBox statusBar = new HBox(statusLabel);
-        statusBar.setPadding(new Insets(5, 10, 5, 10));
-        statusBar.setStyle("-fx-background-color: #1e1e1e;");
-        statusLabel.setStyle("-fx-text-fill: #aaa;");
-        rootLayout.setBottom(statusBar);
-    }
-
-    private void openFileChooser(Stage stage) {
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Seleziona File RAW");
-        fileChooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("File RAW", "*.CR2", "*.CR3", "*.NEF", "*.ARW", "*.DNG", "*.RAF", "*.ORF", "*.rw2"),
-                new FileChooser.ExtensionFilter("Tutti i file", "*.*")
-        );
-
-        File selectedFile = fileChooser.showOpenDialog(stage);
-        if (selectedFile != null) {
-            this.currentRawFile = selectedFile;
-            reloadRawImage();
-        }
-    }
-
-    private void reloadRawImage() {
-        if (currentRawFile == null) return;
-
-        progressIndicator.setVisible(true);
-        statusLabel.setText("Elaborazione RAW in corso via LibRaw FFM...");
-        btnOpenFile.setDisable(true);
-
-        boolean fastPreview = chkFastPreview.isSelected();
-        boolean cameraWB = chkCameraWB.isSelected();
-        boolean autoWB = chkAutoWB.isSelected();
-        String filePath = currentRawFile.getAbsolutePath();
-
-        // Esecuzione asincrona del demosaicing in background
-        Task<BufferedImage> rawTask = new Task<>() {
-            @Override
-            protected BufferedImage call() throws Exception {
-                try (LibRawFFM rawDecoder = new LibRawFFM()) {
-                    return rawDecoder.processRawFile(filePath, fastPreview, cameraWB, autoWB);
-                } catch (Throwable t) {
-                    throw new Exception("Errore decodifica RAW: " + t.getMessage(), t);
-                }
-            }
-        };
-
-        rawTask.setOnSucceeded(e -> {
-            BufferedImage bImg = rawTask.getValue();
-            imageView.setImage(SwingFXUtils.toFXImage(bImg, null));
-            progressIndicator.setVisible(false);
-            btnOpenFile.setDisable(false);
-            statusLabel.setText("Caricato: " + currentRawFile.getName() + " (" + bImg.getWidth() + "x" + bImg.getHeight() + " px)");
-        });
-
-        rawTask.setOnFailed(e -> {
-            progressIndicator.setVisible(false);
-            btnOpenFile.setDisable(false);
-            Throwable ex = rawTask.getException();
-            statusLabel.setText("Errore: " + ex.getMessage());
-            ex.printStackTrace();
-        });
-
-        new Thread(rawTask).start();
-    }
-
-    // Helper per centrare l'immagine e lo spinner
-    private static class StackPaneImageWrapper extends javafx.scene.layout.StackPane {
-        public StackPaneImageWrapper(ImageView iv, ProgressIndicator pi) {
-            getChildren().addAll(iv, pi);
-            setAlignment(Pos.CENTER);
-            setStyle("-fx-background-color: #121212;");
-        }
-    }
-}
-*/
