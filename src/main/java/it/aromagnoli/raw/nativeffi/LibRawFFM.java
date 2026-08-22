@@ -28,7 +28,7 @@ public class LibRawFFM implements AutoCloseable {
     private static final MethodHandle rawGetDataPtrMH;
     private static final MethodHandle rawFreeMemImageMH;
     private static final MethodHandle rawCloseMH;
-
+    private static final MethodHandle convertRawToTiffAdvancedMH;
     static {
 
          String os = System.getProperty("os.name").toLowerCase();
@@ -79,6 +79,20 @@ public class LibRawFFM implements AutoCloseable {
             )
         );
 
+        convertRawToTiffAdvancedMH = LINKER.downcallHandle(
+            LOOKUP.find("convertRawToTiffAdvanced").orElseThrow(),
+            FunctionDescriptor.of(
+                    ValueLayout.JAVA_INT, // Return type
+                    ValueLayout.ADDRESS,  // inputPath
+                    ValueLayout.ADDRESS,  // outputPath
+                    ValueLayout.JAVA_INT, // colorSpace
+                    ValueLayout.JAVA_INT, // demosaicAlgo
+                    ValueLayout.JAVA_INT, // useCameraWB
+                    ValueLayout.JAVA_FLOAT, // noiseThresh
+                    ValueLayout.JAVA_INT   // noiseIteration
+            )
+        );
+
         rawGetProcessedImageMH = LINKER.downcallHandle(
                 LOOKUP.find("raw_get_processed_image").orElseThrow(),
                 FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS)
@@ -114,6 +128,7 @@ public class LibRawFFM implements AutoCloseable {
                 LOOKUP.find("raw_close").orElseThrow(),
                 FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)
         );
+
     }
 
     private final MemorySegment rawHandle;

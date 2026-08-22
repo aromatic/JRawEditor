@@ -124,4 +124,63 @@ void raw_close(libraw_handle_t handle) {
     }
 }
 
+
+/**
+ * Converte un file RAW in TIFF a 16-bit con opzioni avanzate.
+ * 
+ * @param inputPath     Percorso del file RAW sorgente
+ * @param outputPath    Percorso di destinazione (.tif)
+ * @param colorSpace    2 = AdobeRGB, 4 = ProPhotoRGB, 1 = sRGB
+ * @param demosaicAlgo  12 = RCD (Consigliato), 3 = AHD, 1 = VNG
+ * @param useCameraWB   true = Usa il WB della fotocamera, false = WB Automatico
+ * @param noiseThresh   Soglia riduzione rumore Wavelet (es. 0.0 per disabilitare, 250.0 per ISO alti)
+ * @param noiseIteration Numero di iterazioni del filtro mediano (es. 0 per disabilitare, 1-3 per ISO alti)
+ */
+bool convertRawToTiffAdvanced(const char* inputPath, 
+                             const char* outputPath, 
+                             int colorSpace, 
+                             int demosaicAlgo, 
+                             bool useCameraWB, 
+                             float noiseThresh,
+                             int noiseIteration) 
+{
+    LibRaw processor;
+
+    // 1. Apertura e estrazione
+    if (processor.open_file(inputPath) != LIBRAW_SUCCESS) return false;
+    if (processor.unpack() != LIBRAW_SUCCESS) return false;
+
+    // 2. Output 16-bit e Spazio Colore
+    processor.imgdata.params.output_bps = 16;
+    processor.imgdata.params.output_color = colorSpace;
+
+    // 3. Algoritmo di Demosaicing
+    processor.imgdata.params.user_qual = demosaicAlgo;
+
+    // 4. Bilanciamento del Bianco
+    if (useCameraWB) {
+        processor.imgdata.params.use_camera_wb = 1; // WB Fotocamera
+    } else {
+        processor.imgdata.params.use_auto_wb = 1;   // WB Automatico
+    }
+
+    // 5. Riduzione del Rumore
+    if (noiseThresh > 0.0f) {
+        processor.imgdata.params.threshold = noiseThresh; // Wavelet Denoise
+        processor.imgdata.params.med_passes = noiseIteration; // Filtro mediano a N passaggi
+    }
+
+    // 6. Gamma e Luminosità (Linearità per 16-bit)
+    processor.imgdata.params.gamm[0] = 1.0;
+    processor.imgdata.params.gamm[1] = 1.0;
+    processor.imgdata.params.no_auto_bright = 1;
+
+    // 7. Elaborazione e Salvataggio
+    if (processor.dcraw_process() != LIBRAW_SUCCESS) return false;
+    if (processor.dcraw_ppm_tiff_writer(outputPath) != LIBRAW_SUCCESS) return false;
+
+    processor.recycle();
+    return true;
+}
+
 }

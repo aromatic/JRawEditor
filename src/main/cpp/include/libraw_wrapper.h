@@ -32,6 +32,13 @@ void* raw_get_data_ptr(void* processed_img);
 void raw_free_mem_image(void* img);
 void raw_close(libraw_handle_t handle);
 
+bool convertRawToTiffAdvanced(const char* inputPath, 
+                             const char* outputPath, 
+                             int colorSpace, 
+                             int demosaicAlgo, 
+                             bool useCameraWB, 
+                             float noiseThresh,
+                             int noiseIteration);
 #ifdef __cplusplus
 }
 #endif
