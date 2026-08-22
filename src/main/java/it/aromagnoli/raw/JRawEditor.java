@@ -5,11 +5,18 @@ import it.aromagnoli.raw.ui.RawEditorController;
 import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
+import nu.pattern.OpenCV;
 
 public class JRawEditor extends Application {
 
     @Override
     public void start(Stage primaryStage) {
+
+        // Estrae e carica automaticamente le librerie native .so/.dll incluse nel JAR
+        OpenCV.loadLocally(); 
+        
+        System.out.println("OpenCV Caricato con successo!");
+        
         RawEditorController controller = new RawEditorController(primaryStage);
 
         Scene scene = new Scene(controller.getRootLayout(), 1200, 800);

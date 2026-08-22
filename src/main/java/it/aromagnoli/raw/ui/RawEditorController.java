@@ -1,14 +1,24 @@
+
 package it.aromagnoli.raw.ui;
 
+import it.aromagnoli.raw.dialog.ExposureDialog;
+import it.aromagnoli.raw.model.ExposureSettings;
+import it.aromagnoli.raw.model.ImageAdjustmentHistory;
 import it.aromagnoli.raw.nativeffi.LibRawFFM;
-
+import it.aromagnoli.raw.processing.AutoExposureProcessingEngine;
+import it.aromagnoli.raw.processing.ExposureProcessingEngine;
+import it.aromagnoli.raw.util.RawImageConverter;
 import javafx.concurrent.Task;
 import javafx.embed.swing.SwingFXUtils;
+import javafx.fxml.FXML;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
@@ -16,6 +26,9 @@ import javafx.stage.Stage;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.Optional;
+
+import org.opencv.core.Mat;
 
 public class RawEditorController {
 
@@ -24,27 +37,149 @@ public class RawEditorController {
     private final ProgressIndicator progressIndicator = new ProgressIndicator();
     private final Label statusLabel = new Label("Seleziona un file RAW per iniziare");
 
-    // Controlli UI
+    // Controlli UI Generali
     private CheckBox chkFastPreview;
     private CheckBox chkCameraWB;
     private CheckBox chkAutoWB;
     private Button btnOpenFile;
 
+    // Selector Modalità
+    private RadioButton rbStandardMode;
+    private RadioButton rbLinearMode;
+    private ToggleGroup modeToggleGroup;
+
+    // Controlli UI Avanzati per Modalità Lineare
+    private VBox linearOptionsBox;
+    private ComboBox<DemosaicOption> cmbDemosaicAlgo;
+    private ComboBox<ColorSpaceOption> cmbOutputColor;
+    private ComboBox<Integer> cmbOutputBps;
+    
+    // Custom WB Multipliers
+    private CheckBox chkCustomWB;
+    private Spinner<Double> spinMulR;
+    private Spinner<Double> spinMulG;
+    private Spinner<Double> spinMulB;
+    private Spinner<Double> spinMulG2;
+    private GridPane customWbGrid;
+
     private File currentRawFile = null;
+
+    private MenuItem menuEsposizioneManuale;
+    private MenuItem menuEsposizioneAutomatica;
+
+    //@FXML private ImageView imageView;
+
+    // La matrice base decodificata dal RAW in formato Float32 [0.0 - 1.0]
+    private Mat originalRawMatFloat; 
+    
+    private ExposureSettings currentAutoExposureSettings = ExposureSettings.defaultAutoSettings();
+    private ExposureSettings currentManualExposureSettings = ExposureSettings.defaultManualSettings();
+    private ImageAdjustmentHistory history = new ImageAdjustmentHistory();
 
     public RawEditorController(Stage stage) {
         setupUI(stage);
+    }
+
+    @FXML
+    public void initialize() {
+        // Disabilita inizialmente il menù fino a quando un'immagine non viene caricata
+        if (menuEsposizioneManuale != null) {
+            menuEsposizioneManuale.setDisable(true);
+        }
+        menuEsposizioneManuale.setAccelerator(KeyCombination.keyCombination("Shortcut+E"));
+
+        // Disabilita inizialmente il menù fino a quando un'immagine non viene caricata
+        if (menuEsposizioneAutomatica != null) {
+            menuEsposizioneAutomatica.setDisable(true);
+        }
+        menuEsposizioneAutomatica.setAccelerator(KeyCombination.keyCombination("Shortcut+A"));
     }
 
     public BorderPane getRootLayout() {
         return rootLayout;
     }
 
+    /**
+     * Chiamata all'apertura del Dialog di Esposizione
+     */
+    private void openAutoExposureDialog() {
+        //if (originalRawMatFloat == null || originalRawMatFloat.empty()) return;
+
+        ExposureSettings previousSettings = this.currentAutoExposureSettings;
+
+        // Dialog non-distruttivo con Live Preview
+        ExposureDialog dialog = new ExposureDialog(previousSettings, newSettings -> {
+            applyAutoExposurePreview(newSettings);
+        });
+
+        Optional<ExposureSettings> result = dialog.showAndWait();
+
+        if (result.isPresent()) {
+            // Conferma: aggiorna impostazioni correnti e aggiungi allo storico
+            this.currentAutoExposureSettings = result.get();
+            this.history.addStep(this.currentAutoExposureSettings);
+        } else {
+            // Annulla: ripristina la preview allo stato precedente
+            this.currentAutoExposureSettings = previousSettings;
+            applyAutoExposurePreview(previousSettings);
+        }
+    }
+
+
+    /**
+     * Chiamata all'apertura del Dialog di Esposizione
+     */
+    private void openManualExposureDialog() {
+        //if (originalRawMatFloat == null || originalRawMatFloat.empty()) return;
+
+        ExposureSettings previousSettings = this.currentManualExposureSettings;
+
+        // Dialog non-distruttivo con Live Preview
+        ExposureDialog dialog = new ExposureDialog(previousSettings, newSettings -> {
+            applyExposurePreview(newSettings);
+        });
+
+        Optional<ExposureSettings> result = dialog.showAndWait();
+
+        if (result.isPresent()) {
+            // Conferma: aggiorna impostazioni correnti e aggiungi allo storico
+            this.currentManualExposureSettings = result.get();
+            this.history.addStep(this.currentManualExposureSettings);
+        } else {
+            // Annulla: ripristina la preview allo stato precedente
+            this.currentManualExposureSettings = previousSettings;
+            applyExposurePreview(previousSettings);
+        }
+    }
+
+    private void applyAutoExposurePreview(ExposureSettings settings) {
+        // Genera la nuova Image JavaFX a partire dalla Mat Float originale immutata
+        Image updatedImage = AutoExposureProcessingEngine.processAndToFxImage(originalRawMatFloat, settings);
+        if (updatedImage != null) {
+            imageView.setImage(updatedImage);
+        } else {
+             System.out.println("Immagine null");
+        }
+    }
+
+    private void applyExposurePreview(ExposureSettings settings) {
+        // Genera la nuova Image JavaFX a partire dalla Mat Float originale immutata
+        Image updatedImage = ExposureProcessingEngine.processAndToFxImage(originalRawMatFloat, settings);
+        if (updatedImage != null) {
+            imageView.setImage(updatedImage);
+        } else {
+             System.out.println("Immagine null");
+        }
+    }
+
     private void setupUI(Stage stage) {
+        // 1. Crea la barra dei menù principale
+        MenuBar mainMenuBar = createMenuBar();
+        rootLayout.setTop(mainMenuBar);
+
         // --- Area Centrale (Immagine & Spinner) ---
         imageView.setPreserveRatio(true);
-        // Ridimensiona l'immagine mantenendo le proporzioni nella finestra
-        imageView.fitWidthProperty().bind(rootLayout.widthProperty().subtract(250));
+        imageView.fitWidthProperty().bind(rootLayout.widthProperty().subtract(320));
         imageView.fitHeightProperty().bind(rootLayout.heightProperty().subtract(50));
 
         StackPaneImageWrapper centerPane = new StackPaneImageWrapper(imageView, progressIndicator);
@@ -52,10 +187,14 @@ public class RawEditorController {
         rootLayout.setCenter(centerPane);
 
         // --- Pannello Laterale Destro (Controlli RAW) ---
-        VBox sidebar = new VBox(15);
+        VBox sidebar = new VBox(12);
         sidebar.setPadding(new Insets(15));
         sidebar.setStyle("-fx-background-color: #2b2b2b;");
-        sidebar.setPrefWidth(240);
+        sidebar.setPrefWidth(300);
+
+        ScrollPane scrollSidebar = new ScrollPane(sidebar);
+        scrollSidebar.setFitToWidth(true);
+        scrollSidebar.setStyle("-fx-background-color: #2b2b2b; -fx-background: #2b2b2b;");
 
         Label titleLabel = new Label("Impostazioni RAW");
         titleLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
@@ -64,6 +203,21 @@ public class RawEditorController {
         btnOpenFile.setMaxWidth(Double.MAX_VALUE);
         btnOpenFile.setOnAction(e -> openFileChooser(stage));
 
+        // --- Selezione Modalità Processing ---
+        Label modeLabel = new Label("Pipeline di Elaborazione:");
+        modeLabel.setStyle("-fx-text-fill: #ddd; -fx-font-weight: bold;");
+
+        modeToggleGroup = new ToggleGroup();
+        rbStandardMode = new RadioButton("Standard (8-bit + Gamma)");
+        rbStandardMode.setToggleGroup(modeToggleGroup);
+        rbStandardMode.setStyle("-fx-text-fill: white;");
+        rbStandardMode.setSelected(true);
+
+        rbLinearMode = new RadioButton("Lineare Parametrizzata (Gamma 1.0)");
+        rbLinearMode.setToggleGroup(modeToggleGroup);
+        rbLinearMode.setStyle("-fx-text-fill: white;");
+
+        // --- Controlli WB & Preview Condivisi ---
         chkFastPreview = new CheckBox("Anteprima Veloce (Half Size)");
         chkFastPreview.setSelected(true);
         chkFastPreview.setStyle("-fx-text-fill: white;");
@@ -75,27 +229,149 @@ public class RawEditorController {
         chkAutoWB = new CheckBox("Auto Bilanciamento Bianco");
         chkAutoWB.setStyle("-fx-text-fill: white;");
 
-        // Mutua esclusione basica per i WB
+        // --- SEZIONE OPZIONI LINEARI ---
+        linearOptionsBox = new VBox(10);
+        linearOptionsBox.setPadding(new Insets(10));
+        linearOptionsBox.setStyle("-fx-background-color: #1e1e1e; -fx-background-radius: 5;");
+        linearOptionsBox.setDisable(true); // Disabilitato finché si è in modalità standard
+
+        Label linearTitle = new Label("⚙ Parametri Lineari Avanzati");
+        linearTitle.setStyle("-fx-text-fill: #00e5ff; -fx-font-weight: bold;");
+
+        // Demosaicing Algo
+        Label lblDemosaic = new Label("Algoritmo Demosaicing:");
+        lblDemosaic.setStyle("-fx-text-fill: #aaa;");
+        cmbDemosaicAlgo = new ComboBox<>();
+        cmbDemosaicAlgo.setMaxWidth(Double.MAX_VALUE);
+        cmbDemosaicAlgo.getItems().addAll(
+                new DemosaicOption("0 - Bilineare (Veloce)", 0),
+                new DemosaicOption("1 - VNG", 1),
+                new DemosaicOption("2 - PPG", 2),
+                new DemosaicOption("3 - AHD (Default dcraw)", 3),
+                new DemosaicOption("4 - DCB", 4),
+                new DemosaicOption("11 - DHT", 11),
+                new DemosaicOption("12 - RCD (Consigliato)", 12)
+        );
+        cmbDemosaicAlgo.getSelectionModel().select(6); // RCD default
+
+        // Output Color Space
+        Label lblColor = new Label("Spazio Colore Primaries:");
+        lblColor.setStyle("-fx-text-fill: #aaa;");
+        cmbOutputColor = new ComboBox<>();
+        cmbOutputColor.setMaxWidth(Double.MAX_VALUE);
+        cmbOutputColor.getItems().addAll(
+                new ColorSpaceOption("0 - Raw Nativo Sensore", 0),
+                new ColorSpaceOption("1 - sRGB Primaries", 1),
+                new ColorSpaceOption("2 - Adobe RGB Primaries", 2),
+                new ColorSpaceOption("6 - ACES Linear", 6)
+        );
+        cmbOutputColor.getSelectionModel().select(1); // sRGB default
+
+        // Output BPS
+        Label lblBps = new Label("Profondità di Bit (BPS):");
+        lblBps.setStyle("-fx-text-fill: #aaa;");
+        cmbOutputBps = new ComboBox<>();
+        cmbOutputBps.setMaxWidth(Double.MAX_VALUE);
+        cmbOutputBps.getItems().addAll(16, 8);
+        cmbOutputBps.getSelectionModel().select(Integer.valueOf(16)); // 16-bit consigliato
+
+        // Custom WB Multipliers
+        chkCustomWB = new CheckBox("Usa WB Personalizzato");
+        chkCustomWB.setStyle("-fx-text-fill: white;");
+
+        customWbGrid = new GridPane();
+        customWbGrid.setHgap(5);
+        customWbGrid.setVgap(5);
+        customWbGrid.setDisable(true);
+
+        spinMulR  = createWbSpinner();
+        spinMulG  = createWbSpinner();
+        spinMulB  = createWbSpinner();
+        spinMulG2 = createWbSpinner();
+
+        customWbGrid.add(new Label("R:") {{ setStyle("-fx-text-fill: white;"); }}, 0, 0);
+        customWbGrid.add(spinMulR, 1, 0);
+        customWbGrid.add(new Label("G:") {{ setStyle("-fx-text-fill: white;"); }}, 2, 0);
+        customWbGrid.add(spinMulG, 3, 0);
+        customWbGrid.add(new Label("B:") {{ setStyle("-fx-text-fill: white;"); }}, 0, 1);
+        customWbGrid.add(spinMulB, 1, 1);
+        customWbGrid.add(new Label("G2:") {{ setStyle("-fx-text-fill: white;"); }}, 2, 1);
+        customWbGrid.add(spinMulG2, 3, 1);
+
+        linearOptionsBox.getChildren().addAll(
+                linearTitle,
+                lblDemosaic, cmbDemosaicAlgo,
+                lblColor, cmbOutputColor,
+                lblBps, cmbOutputBps,
+                new Separator(),
+                chkCustomWB, customWbGrid
+        );
+
+        // --- LISTENER E EVENTI UI ---
+
+        // Attivazione/Disattivazione Box opzioni lineari
+        modeToggleGroup.selectedToggleProperty().addListener((obs, oldVal, newVal) -> {
+            boolean isLinear = rbLinearMode.isSelected();
+            linearOptionsBox.setDisable(!isLinear);
+            reloadRawImage();
+        });
+
+        // Gestione mutua esclusione WB
         chkCameraWB.setOnAction(e -> {
-            if (chkCameraWB.isSelected()) chkAutoWB.setSelected(false);
+            if (chkCameraWB.isSelected()) {
+                chkAutoWB.setSelected(false);
+                chkCustomWB.setSelected(false);
+                customWbGrid.setDisable(true);
+            }
             reloadRawImage();
         });
+
         chkAutoWB.setOnAction(e -> {
-            if (chkAutoWB.isSelected()) chkCameraWB.setSelected(false);
+            if (chkAutoWB.isSelected()) {
+                chkCameraWB.setSelected(false);
+                chkCustomWB.setSelected(false);
+                customWbGrid.setDisable(true);
+            }
             reloadRawImage();
         });
+
+        chkCustomWB.setOnAction(e -> {
+            boolean isCustom = chkCustomWB.isSelected();
+            customWbGrid.setDisable(!isCustom);
+            if (isCustom) {
+                chkCameraWB.setSelected(false);
+                chkAutoWB.setSelected(false);
+            }
+            reloadRawImage();
+        });
+
         chkFastPreview.setOnAction(e -> reloadRawImage());
+        cmbDemosaicAlgo.setOnAction(e -> reloadRawImage());
+        cmbOutputColor.setOnAction(e -> reloadRawImage());
+        cmbOutputBps.setOnAction(e -> reloadRawImage());
+
+        // Reload sui cambiamenti degli spinner WB
+        spinMulR.valueProperty().addListener((o, oldV, newV) -> { if (chkCustomWB.isSelected()) reloadRawImage(); });
+        spinMulG.valueProperty().addListener((o, oldV, newV) -> { if (chkCustomWB.isSelected()) reloadRawImage(); });
+        spinMulB.valueProperty().addListener((o, oldV, newV) -> { if (chkCustomWB.isSelected()) reloadRawImage(); });
+        spinMulG2.valueProperty().addListener((o, oldV, newV) -> { if (chkCustomWB.isSelected()) reloadRawImage(); });
 
         sidebar.getChildren().addAll(
                 titleLabel,
                 btnOpenFile,
                 new Separator(),
+                modeLabel,
+                rbStandardMode,
+                rbLinearMode,
+                new Separator(),
                 chkFastPreview,
                 chkCameraWB,
-                chkAutoWB
+                chkAutoWB,
+                new Separator(),
+                linearOptionsBox
         );
 
-        rootLayout.setRight(sidebar);
+        rootLayout.setRight(scrollSidebar);
 
         // --- Barra di Stato Inferiore ---
         HBox statusBar = new HBox(statusLabel);
@@ -103,6 +379,50 @@ public class RawEditorController {
         statusBar.setStyle("-fx-background-color: #1e1e1e;");
         statusLabel.setStyle("-fx-text-fill: #aaa;");
         rootLayout.setBottom(statusBar);
+    }
+
+    /**
+     * Metodo helper per costruire la barra dei menù e le sue voci
+     */
+    private MenuBar createMenuBar() {
+        MenuBar menuBar = new MenuBar();
+
+        // --- Menù Immagine ---
+        Menu menuImmagine = new Menu("Immagine");
+        
+        // Assegnazione della variabile membro di classe così da poterla usare/abilitare dopo
+        this.menuEsposizioneManuale = new MenuItem("Esposizione manuale");
+        
+        // Stato iniziale: disabilitato se non c'è ancora un'immagine caricata
+        this.menuEsposizioneManuale.setDisable(true);
+        
+        // Collega l'azione di apertura del Dialog
+        this.menuEsposizioneManuale.setOnAction(e -> openManualExposureDialog());
+
+        menuImmagine.getItems().add(this.menuEsposizioneManuale);
+
+        // Assegnazione della variabile membro di classe così da poterla usare/abilitare dopo
+        this.menuEsposizioneAutomatica = new MenuItem("Esposizione automatica");
+        
+        // Stato iniziale: disabilitato se non c'è ancora un'immagine caricata
+        this.menuEsposizioneAutomatica.setDisable(true);
+        
+        // Collega l'azione di apertura del Dialog
+        this.menuEsposizioneAutomatica.setOnAction(e -> openAutoExposureDialog());
+
+        menuImmagine.getItems().add(this.menuEsposizioneAutomatica);
+
+        // Aggiungi i menù alla barra
+        menuBar.getMenus().addAll(menuImmagine);
+
+        return menuBar;
+    }
+
+    private Spinner<Double> createWbSpinner() {
+        Spinner<Double> spinner = new Spinner<>(0.1, 10.0, 1.0, 0.05);
+        spinner.setEditable(true);
+        spinner.setPrefWidth(65);
+        return spinner;
     }
 
     private void openFileChooser(Stage stage) {
@@ -118,6 +438,16 @@ public class RawEditorController {
             this.currentRawFile = selectedFile;
             reloadRawImage();
         }
+
+        // 2. Abilita la voce di menù nell'interfaccia
+        if (menuEsposizioneManuale != null) {
+            menuEsposizioneManuale.setDisable(false);
+        }
+
+        // 2. Abilita la voce di menù nell'interfaccia
+        if (menuEsposizioneAutomatica != null) {
+            menuEsposizioneAutomatica.setDisable(false);
+        }
     }
 
     private void reloadRawImage() {
@@ -130,14 +460,54 @@ public class RawEditorController {
         boolean fastPreview = chkFastPreview.isSelected();
         boolean cameraWB = chkCameraWB.isSelected();
         boolean autoWB = chkAutoWB.isSelected();
+        boolean isLinearMode = rbLinearMode.isSelected();
         String filePath = currentRawFile.getAbsolutePath();
 
-        // Esecuzione asincrona del demosaicing in background
-        Task<BufferedImage> rawTask = new Task<>() {
+        // Parametri per modalità lineare
+        int demosaicAlgo = cmbDemosaicAlgo.getValue() != null ? cmbDemosaicAlgo.getValue().code() : 12;
+        int outputColor = cmbOutputColor.getValue() != null ? cmbOutputColor.getValue().code() : 1;
+        int outputBps = cmbOutputBps.getValue() != null ? cmbOutputBps.getValue() : 16;
+
+        float[] customMul = null;
+        if (chkCustomWB.isSelected()) {
+            customMul = new float[]{
+                    spinMulR.getValue().floatValue(),
+                    spinMulG.getValue().floatValue(),
+                    spinMulB.getValue().floatValue(),
+                    spinMulG2.getValue().floatValue()
+            };
+        }
+
+        final float[] finalCustomMul = customMul;
+
+        // Struttura di supporto per restituire sia il BufferedImage (per FX) sia la Mat Float
+        record RawLoadResult(BufferedImage bImg, Mat floatMat) {}
+
+        // Esecuzione asincrona del demosaicing e conversione OpenCV in background
+        Task<RawLoadResult> rawTask = new Task<>() {
             @Override
-            protected BufferedImage call() throws Exception {
+            protected RawLoadResult call() throws Exception {
                 try (LibRawFFM rawDecoder = new LibRawFFM()) {
-                    return rawDecoder.processRawFile(filePath, fastPreview, cameraWB, autoWB);
+                    BufferedImage bImg;
+                    if (!isLinearMode) {
+                        bImg = rawDecoder.processRawFile(filePath, fastPreview, cameraWB, autoWB);
+                    } else {
+                        bImg = rawDecoder.processRawFileLinear(
+                                filePath,
+                                cameraWB,
+                                autoWB,
+                                finalCustomMul,
+                                demosaicAlgo,
+                                outputColor,
+                                outputBps,
+                                fastPreview
+                        );
+                    }
+
+                    // Conversione in Mat CV_32FC3 eseguita in background
+                    Mat floatMat = RawImageConverter.bufferedImageToMatFloat32(bImg);
+
+                    return new RawLoadResult(bImg, floatMat);
                 } catch (Throwable t) {
                     throw new Exception("Errore decodifica RAW: " + t.getMessage(), t);
                 }
@@ -145,11 +515,38 @@ public class RawEditorController {
         };
 
         rawTask.setOnSucceeded(e -> {
-            BufferedImage bImg = rawTask.getValue();
+            RawLoadResult result = rawTask.getValue();
+            BufferedImage bImg = result.bImg();
+
+            // 1. Libera la memoria nativa della matrice precedente prima di sostituirla
+            if (this.originalRawMatFloat != null && !this.originalRawMatFloat.empty()) {
+            this.originalRawMatFloat.release();
+            }
+
+            // 2. Assegna la nuova matrice Float
+            this.originalRawMatFloat = result.floatMat();
+
+            // 3. Resetta le impostazioni di esposizione correnti
+            this.currentManualExposureSettings = ExposureSettings.defaultManualSettings();
+            this.currentAutoExposureSettings = ExposureSettings.defaultAutoSettings();
+
+            // 4. Abilita la voce di menù Esposizione
+            if (menuEsposizioneManuale != null) {
+                menuEsposizioneManuale.setDisable(false);
+            }
+
+             // 4. Abilita la voce di menù Esposizione
+            if (menuEsposizioneAutomatica != null) {
+                menuEsposizioneAutomatica.setDisable(false);
+            }
+
+            // 5. Aggiorna l'interfaccia JavaFX
             imageView.setImage(SwingFXUtils.toFXImage(bImg, null));
             progressIndicator.setVisible(false);
             btnOpenFile.setDisable(false);
-            statusLabel.setText("Caricato: " + currentRawFile.getName() + " (" + bImg.getWidth() + "x" + bImg.getHeight() + " px)");
+
+            String modeStr = isLinearMode ? ("Lineare " + outputBps + "-bit") : "Standard 8-bit";
+            statusLabel.setText("Caricato [" + modeStr + "]: " + currentRawFile.getName() + " (" + bImg.getWidth() + "x" + bImg.getHeight() + " px)");
         });
 
         rawTask.setOnFailed(e -> {
@@ -163,6 +560,18 @@ public class RawEditorController {
         new Thread(rawTask).start();
     }
 
+
+     // Records di comodo per popolamento ComboBox
+    private record DemosaicOption(String label, int code) {
+        @Override
+        public String toString() { return label; }
+    }
+
+    private record ColorSpaceOption(String label, int code) {
+        @Override
+        public String toString() { return label; }
+    }
+
     // Helper per centrare l'immagine e lo spinner
     private static class StackPaneImageWrapper extends javafx.scene.layout.StackPane {
         public StackPaneImageWrapper(ImageView iv, ProgressIndicator pi) {
@@ -172,3 +581,7 @@ public class RawEditorController {
         }
     }
 }
+
+
+
+
