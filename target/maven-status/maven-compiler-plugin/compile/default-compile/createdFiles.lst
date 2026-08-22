@@ -1,6 +1,7 @@
 it/aromagnoli/raw/model/ImageAdjustmentHistory.class
 it/aromagnoli/raw/ui/RawEditorController.class
 it/aromagnoli/raw/ui/RawEditorController$DemosaicOption.class
+it/aromagnoli/raw/nativeffi/NativeRawBridge$RawMetadata.class
 it/aromagnoli/raw/JRawEditor.class
 it/aromagnoli/raw/model/ExposureSettings.class
 it/aromagnoli/raw/ui/RawEditorController$4.class
@@ -9,6 +10,7 @@ it/aromagnoli/raw/dialog/ExposureDialog.class
 it/aromagnoli/raw/processing/ExposureProcessingEngine.class
 it/aromagnoli/raw/ui/RawEditorController$3.class
 it/aromagnoli/raw/util/RawImageConverter.class
+it/aromagnoli/raw/nativeffi/NativeRawBridge.class
 it/aromagnoli/raw/ui/RawEditorController$2.class
 it/aromagnoli/raw/ui/RawEditorController$StackPaneImageWrapper.class
 it/aromagnoli/raw/dialog/ExposureDialog$1.class
