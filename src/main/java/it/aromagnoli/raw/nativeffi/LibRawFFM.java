@@ -6,10 +6,8 @@ import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.awt.Transparency;
 import java.awt.color.ColorSpace;
-import java.awt.image.BufferedImage;
 import java.awt.image.ComponentColorModel;
 import java.awt.image.DataBuffer;
-import java.awt.image.DataBufferByte;
 import java.awt.image.DataBufferUShort;
 import java.awt.image.Raster;
 import java.awt.image.WritableRaster;
@@ -32,21 +30,23 @@ public class LibRawFFM implements AutoCloseable {
     private static final MethodHandle rawCloseMH;
 
     static {
-        String os = System.getProperty("os.name").toLowerCase();
+
+         String os = System.getProperty("os.name").toLowerCase();
 
         if (os.contains("win")) {
             System.out.println("Sei su Windows");
-            System.loadLibrary("raw_wrapper");
+            //System.loadLibrary("libraw_wrapper.dll"); // Assicurati che il nome della DLL sia corretto
         } else if (os.contains("nix") || os.contains("nux") || os.contains("aix")) {
             System.out.println("Sei su Linux");
-            System.loadLibrary("raw_wrapper");
+            //System.loadLibrary("libraw_wrapper.so");
         } else if (os.contains("mac")) {
             System.out.println("Sei su macOS");
-            System.loadLibrary("raw_wrapper");
+            //System.loadLibrary("libraw_wrapper.dylib");
         } else {
             System.out.println("Sistema operativo non riconosciuto: " + os);
         }
-        
+        System.loadLibrary("raw_wrapper");
+
         LOOKUP = SymbolLookup.loaderLookup();
 
         rawInitMH = LINKER.downcallHandle(

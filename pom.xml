@@ -106,7 +106,7 @@
                         <option>--enable-native-access=ALL-UNNAMED,javafx.graphics</option>
                         
                         <!-- Percorso delle librerie native (.so, .dylib, .dll) -->
-                        <option>-Djava.library.path=${project.basedir}\target\classes\native\</option>
+                        <option>-Djava.library.path=${project.basedir}/target/classes/native</option>
                     </options>
                 </configuration>
             </plugin>
