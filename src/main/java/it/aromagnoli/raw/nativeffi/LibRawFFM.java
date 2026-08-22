@@ -22,7 +22,22 @@ public class LibRawFFM implements AutoCloseable {
     private static final MethodHandle rawCloseMH;
 
     static {
-        System.loadLibrary("raw_wrapper");
+		String os = System.getProperty("os.name").toLowerCase();
+
+        if (os.contains("win")) {
+            System.out.println("Sei su Windows");
+			System.loadLibrary("libraw_wrapper.dll");
+        } else if (os.contains("nix") || os.contains("nux") || os.contains("aix")) {
+            System.out.println("Sei su Linux");
+			System.loadLibrary("libraw_wrapper.so");
+        } else if (os.contains("mac")) {
+            System.out.println("Sei su macOS");
+			System.loadLibrary("libraw_wrapper.dylib");
+        } else {
+            System.out.println("Sistema operativo non riconosciuto: " + os);
+        }
+		
+        
         LOOKUP = SymbolLookup.loaderLookup();
 
         rawInitMH = LINKER.downcallHandle(
